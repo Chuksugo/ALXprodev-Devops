@@ -5,32 +5,28 @@ output_file="pokemon_report.csv"
 
 echo "Name,Height (m),Weight (kg)" > "$output_file"
 
-# Initialize sum and count variables
 sum_height=0
 sum_weight=0
 count=0
 
-# Read each JSON file in the input directory
 for file in "$input_dir"/*.json; do
-  # Extract fields using jq
   name=$(jq -r '.name' "$file")
   height_dm=$(jq -r '.height' "$file")
   weight_hg=$(jq -r '.weight' "$file")
 
-  # Convert decimeters to meters, hectograms to kg
   height=$(echo "scale=2; $height_dm / 10" | bc)
   weight=$(echo "scale=2; $weight_hg / 10" | bc)
 
-  # Append to CSV
-  echo "${name^},$height,$weight" >> "$output_file"  # ${name^} capitalizes first letter
+  # Capitalize first letter with sed
+  capitalized_name=$(echo "$name" | sed 's/^\(.\)/\U\1/')
 
-  # Accumulate totals for average
+  echo "$capitalized_name,$height,$weight" >> "$output_file"
+
   sum_height=$(echo "$sum_height + $height" | bc)
   sum_weight=$(echo "$sum_weight + $weight" | bc)
   ((count++))
 done
 
-# Calculate averages with awk for formatting to 2 decimal places
 avg_height=$(awk "BEGIN {printf \"%.2f\", $sum_height/$count}")
 avg_weight=$(awk "BEGIN {printf \"%.2f\", $sum_weight/$count}")
 
