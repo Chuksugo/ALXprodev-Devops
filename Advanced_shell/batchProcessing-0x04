@@ -3,12 +3,14 @@
 output_dir="pokemon_data"
 mkdir -p "$output_dir"
 error_log="errors_parallel.txt"
-> "$error_log"  # clear previous error log
+> "$error_log"  # clear error log
 
 pokemons=("bulbasaur" "ivysaur" "venusaur" "charmander" "charmeleon")
-max_parallel=3  # limit parallel jobs to avoid API overload
+max_parallel=3
+timeout=10  # seconds allowed per fetch
 
-# Function to fetch Pokémon data with retry logic
+declare -A pid_map  # to track pid -> pokemon
+
 fetch_pokemon() {
   local pokemon=$1
   local retries=0
@@ -32,30 +34,47 @@ fetch_pokemon() {
   fi
 }
 
-# Export function and variables for parallel execution if using xargs or GNU parallel
-export -f fetch_pokemon
-export output_dir
-export error_log
+start_job() {
+  local pokemon=$1
+  fetch_pokemon "$pokemon" &
+  local pid=$!
+  pid_map[$pid]=$pokemon
+}
 
-# Limit the number of parallel jobs manually
 running_jobs=0
 
 for pokemon in "${pokemons[@]}"; do
-  fetch_pokemon "$pokemon" &
+  start_job "$pokemon"
   ((running_jobs++))
 
-  # If max parallel jobs reached, wait for any to finish
-  if (( running_jobs >= max_parallel )); then
-    wait -n  # wait for any background process to finish
-    ((running_jobs--))
-  fi
+  # Limit parallel jobs
+  while (( running_jobs >= max_parallel )); do
+    for pid in "${!pid_map[@]}"; do
+      if ! kill -0 "$pid" 2>/dev/null; then
+        # Process finished
+        unset pid_map[$pid]
+        ((running_jobs--))
+      else
+        # Check runtime and kill if over timeout
+        runtime=$(ps -p "$pid" -o etimes=)
+        if (( runtime > timeout )); then
+          echo "Job for ${pid_map[$pid]} (PID $pid) exceeded timeout. Killing..."
+          kill -9 "$pid"
+          echo "Killed job for ${pid_map[$pid]} due to timeout." >> "$error_log"
+          unset pid_map[$pid]
+          ((running_jobs--))
+        fi
+      fi
+    done
+    sleep 1
+  done
 done
 
-# Wait for all remaining background jobs
+# Wait for remaining jobs to finish
 wait
 
 if [[ -s "$error_log" ]]; then
-  echo "Some Pokémon failed to download. See $error_log for details."
+  echo "Some Pokémon failed or jobs were killed. Check $error_log for details."
 else
   echo "All Pokémon data fetched successfully."
 fi
