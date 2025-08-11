@@ -1,0 +1,61 @@
+#!/bin/bash
+
+output_dir="pokemon_data"
+mkdir -p "$output_dir"
+error_log="errors_parallel.txt"
+> "$error_log"  # clear previous error log
+
+pokemons=("bulbasaur" "ivysaur" "venusaur" "charmander" "charmeleon")
+max_parallel=3  # limit parallel jobs to avoid API overload
+
+# Function to fetch Pokémon data with retry logic
+fetch_pokemon() {
+  local pokemon=$1
+  local retries=0
+  local max_retries=3
+  local success=0
+
+  while (( retries < max_retries )); do
+    if curl -s -f "https://pokeapi.co/api/v2/pokemon/$pokemon" -o "$output_dir/$pokemon.json"; then
+      echo "Saved data to $output_dir/$pokemon.json ✅"
+      success=1
+      break
+    else
+      ((retries++))
+      echo "Attempt $retries for $pokemon failed, retrying..."
+      sleep 2
+    fi
+  done
+
+  if [[ $success -eq 0 ]]; then
+    echo "Failed to fetch data for $pokemon after $max_retries attempts ❌" >> "$error_log"
+  fi
+}
+
+# Export function and variables for parallel execution if using xargs or GNU parallel
+export -f fetch_pokemon
+export output_dir
+export error_log
+
+# Limit the number of parallel jobs manually
+running_jobs=0
+
+for pokemon in "${pokemons[@]}"; do
+  fetch_pokemon "$pokemon" &
+  ((running_jobs++))
+
+  # If max parallel jobs reached, wait for any to finish
+  if (( running_jobs >= max_parallel )); then
+    wait -n  # wait for any background process to finish
+    ((running_jobs--))
+  fi
+done
+
+# Wait for all remaining background jobs
+wait
+
+if [[ -s "$error_log" ]]; then
+  echo "Some Pokémon failed to download. See $error_log for details."
+else
+  echo "All Pokémon data fetched successfully."
+fi
